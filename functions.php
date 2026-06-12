@@ -842,6 +842,11 @@ add_action('save_post_performer', 'joyvia_master_sync_performer', 99, 2);
 function joyvia_master_sync_performer($post_id, $post) {
     if (wp_is_post_revision($post_id) || (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE)) return;
 
+    // Не вмешиваемся в служебные статусы. Иначе при отправке в корзину
+    // (wp_trash_post меняет статус на 'trash' через wp_update_post) хук
+    // вернул бы пост обратно — и исполнителя нельзя было бы удалить.
+    if (in_array($post->post_status, ['trash', 'auto-draft', 'inherit'], true)) return;
+
     // Защита от рекурсии
     remove_action('save_post_performer', 'joyvia_master_sync_performer', 99);
 
@@ -1309,6 +1314,45 @@ function joyvia_delete_account_cb() {
         wp_send_json_success();
     } else {
         wp_send_json_error('Ошибка при удалении аккаунта из базы данных');
+    }
+}
+
+
+//*************** Удаление профиля-исполнителя при удалении пользователя -----------------------
+// Тип CPT performer регистрируется так, что WP не удаляет его автоматически
+// вместе с пользователем. Поэтому при удалении юзера (в т.ч. из wp-admin/users.php)
+// явно подчищаем его профиль(и) и загруженные им вложения.
+add_action('delete_user', 'joyvia_cleanup_performer_on_user_delete', 10, 1);
+function joyvia_cleanup_performer_on_user_delete($user_id) {
+    $user_id = (int) $user_id;
+    if (!$user_id) return;
+
+    $performers = get_posts([
+        'post_type'      => 'performer',
+        'author'         => $user_id,
+        'post_status'    => 'any',
+        'posts_per_page' => -1,
+        'fields'         => 'ids',
+        'no_found_rows'  => true,
+    ]);
+
+    // Снимаем мастер-хук, чтобы он не вмешивался в удаление
+    remove_action('save_post_performer', 'joyvia_master_sync_performer', 99);
+    foreach ($performers as $pid) {
+        wp_delete_post($pid, true);
+    }
+    add_action('save_post_performer', 'joyvia_master_sync_performer', 99, 2);
+
+    $attachments = get_posts([
+        'post_type'      => 'attachment',
+        'post_status'    => 'inherit',
+        'author'         => $user_id,
+        'posts_per_page' => -1,
+        'fields'         => 'ids',
+        'no_found_rows'  => true,
+    ]);
+    foreach ($attachments as $att_id) {
+        wp_delete_attachment($att_id, true);
     }
 }
 

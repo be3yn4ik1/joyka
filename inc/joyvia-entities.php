@@ -200,8 +200,15 @@ function joyvia_block_term_delete_with_deps($term_id, $taxonomy) {
 
     if (empty($parts)) return;
 
-    $message = 'Удаление невозможно. Сущность используется: ' . implode('; ', $parts) .
-               '. Сначала удалите зависимые страницы каталога и снимите сущность с исполнителей.';
+    // Подсказку формируем по тому, что реально блокирует удаление.
+    $todo = [];
+    if (!empty($deps['catalog_pages'])) $todo[] = 'удалите или перепривяжите указанные страницы каталога';
+    if (!empty($deps['performers']))    $todo[] = 'снимите сущность с перечисленных исполнителей';
+    if (!empty($deps['child_events']))  $todo[] = 'сначала удалите подсобытия';
+    if (!empty($deps['skills']) || !empty($deps['specs'])) $todo[] = 'отвяжите связанные навыки/специализации';
+    $tail = $todo ? ' Чтобы продолжить — ' . implode('; ', $todo) . '.' : '';
+
+    $message = 'Удаление невозможно. Сущность используется: ' . implode('; ', $parts) . '.' . $tail;
 
     if (wp_doing_ajax()) {
         wp_send_json_error($message, 409);
