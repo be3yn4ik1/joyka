@@ -149,21 +149,34 @@ function joyvia_format_dependency_message($deps) {
     if (!empty($deps['catalog_pages'])) {
         $links = [];
         foreach (array_slice($deps['catalog_pages'], 0, 5) as $pid) {
-            $url = get_post_meta($pid, 'generated_url', true);
+            $url   = get_post_meta($pid, 'generated_url', true);
             $title = get_the_title($pid) ?: ('#' . $pid);
-            $links[] = $url ? ($title . ' (/' . trim($url, '/') . '/)') : $title;
+            $edit  = get_edit_post_link($pid, '');
+            $label = $url ? ($title . ' (/' . trim($url, '/') . '/)') : $title;
+            $links[] = $edit
+                ? '<a href="' . esc_url($edit) . '">' . esc_html($label) . '</a>'
+                : esc_html($label);
         }
         $more = count($deps['catalog_pages']) > 5 ? ' и ещё ' . (count($deps['catalog_pages']) - 5) : '';
         $parts[] = 'страницы каталога: ' . implode(', ', $links) . $more;
     }
     if (!empty($deps['performers'])) {
-        $parts[] = 'профили исполнителей (' . count($deps['performers']) . ' шт.)';
+        $links = [];
+        foreach (array_slice($deps['performers'], 0, 10) as $pid) {
+            $title = get_the_title($pid) ?: ('#' . $pid);
+            $edit  = get_edit_post_link($pid, '');
+            $links[] = $edit
+                ? '<a href="' . esc_url($edit) . '">' . esc_html($title) . '</a>'
+                : esc_html($title);
+        }
+        $more = count($deps['performers']) > 10 ? ' и ещё ' . (count($deps['performers']) - 10) : '';
+        $parts[] = 'связанные исполнители: ' . implode(', ', $links) . $more;
     }
     if (!empty($deps['child_events'])) {
         $names = [];
         foreach (array_slice($deps['child_events'], 0, 5) as $tid) {
             $t = get_term($tid);
-            if ($t && !is_wp_error($t)) $names[] = $t->name;
+            if ($t && !is_wp_error($t)) $names[] = esc_html($t->name);
         }
         $more = count($deps['child_events']) > 5 ? ' и ещё ' . (count($deps['child_events']) - 5) : '';
         $parts[] = 'подсобытия: ' . implode(', ', $names) . $more;
@@ -193,7 +206,57 @@ function joyvia_block_term_delete_with_deps($term_id, $taxonomy) {
     if (wp_doing_ajax()) {
         wp_send_json_error($message, 409);
     }
-    wp_die(esc_html($message), 'Удаление заблокировано', ['back_link' => true, 'response' => 409]);
+    wp_die($message, 'Удаление заблокировано', ['back_link' => true, 'response' => 409]);
+}
+
+
+/**
+ * WP удаляет термины из таблицы через AJAX (action=delete-tag). Наш hook
+ * pre_delete_term отдаёт 409 + JSON, но штатный обработчик ничего не выводит —
+ * пользователь видит только «409 (Conflict)» в консоли, а строка остаётся.
+ * Перехватываем ошибку и показываем понятное уведомление сверху списка.
+ */
+add_action('admin_footer-edit-tags.php', 'joyvia_inject_term_delete_notice_js');
+function joyvia_inject_term_delete_notice_js() {
+    $screen = get_current_screen();
+    if (!$screen || !in_array($screen->taxonomy, JOYVIA_ENTITY_TAXONOMIES, true)) return;
+    ?>
+    <script>
+    (function($){
+        $(document).ajaxError(function(event, jqXHR, settings){
+            if (!jqXHR || jqXHR.status !== 409) return;
+            var data = (settings && settings.data) ? String(settings.data) : '';
+            if (data.indexOf('action=delete-tag') === -1) return;
+
+            var msg = '';
+            try {
+                var r = JSON.parse(jqXHR.responseText);
+                msg = (r && r.data) ? r.data : '';
+            } catch (e) {
+                msg = jqXHR.responseText || '';
+            }
+            if (!msg) return;
+
+            $('#joyvia-term-delete-notice').remove();
+            var $notice = $(
+                '<div id="joyvia-term-delete-notice" class="notice notice-error is-dismissible">' +
+                '<p>' + msg + '</p>' +
+                '<button type="button" class="notice-dismiss"><span class="screen-reader-text">Скрыть</span></button>' +
+                '</div>'
+            );
+            $notice.find('.notice-dismiss').on('click', function(){ $notice.remove(); });
+
+            var $anchor = $('.wrap h1').first();
+            if ($anchor.length) {
+                $anchor.after($notice);
+            } else {
+                $('.wrap').first().prepend($notice);
+            }
+            $('html, body').animate({ scrollTop: 0 }, 200);
+        });
+    })(jQuery);
+    </script>
+    <?php
 }
 
 
