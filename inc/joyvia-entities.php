@@ -73,6 +73,14 @@ function joyvia_dependent_catalog_pages($term_id, $taxonomy) {
         'event_child'    => ['catalog_subevent', 'catalog_event'],
         'specialization' => ['catalog_spec'],
     ];
+    // Типы страниц, для которых поле реально используется (по условной логике ACF).
+    // Без этого «висячие» мета-значения скрытых полей дают ложные зависимости.
+    $active_types = [
+        'catalog_profession' => ['event_prof', 'subevent_prof', 'spec_prof', 'prof_only'],
+        'catalog_event'      => ['hub_event', 'hub_subevent', 'event_prof', 'subevent_prof'],
+        'catalog_subevent'   => ['hub_subevent', 'subevent_prof'],
+        'catalog_spec'       => ['spec_prof'],
+    ];
     $key = $taxonomy;
     if ($taxonomy === 'event') {
         $term = get_term($term_id);
@@ -82,12 +90,19 @@ function joyvia_dependent_catalog_pages($term_id, $taxonomy) {
 
     $found = [];
     foreach ($field_map[$key] as $meta_key) {
+        $meta_query = [
+            'relation' => 'AND',
+            ['key' => $meta_key, 'value' => (int) $term_id],
+        ];
+        if (!empty($active_types[$meta_key])) {
+            $meta_query[] = ['key' => 'page_type', 'value' => $active_types[$meta_key], 'compare' => 'IN'];
+        }
         $q = new WP_Query([
             'post_type'      => 'catalog_page',
             'post_status'    => 'any',
             'posts_per_page' => -1,
             'fields'         => 'ids',
-            'meta_query'     => [['key' => $meta_key, 'value' => (int) $term_id]],
+            'meta_query'     => $meta_query,
             'no_found_rows'  => true,
         ]);
         foreach ($q->posts as $pid) $found[$pid] = $pid;
